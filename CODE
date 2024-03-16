@@ -1,0 +1,375 @@
+import yfinance as yf
+import numpy as np
+import pandas as pd
+from datetime import datetime, timedelta
+import time
+import pickle
+import pytz
+import random
+from ta.trend import SMAIndicator, EMAIndicator
+from ta.momentum import RSIIndicator
+from ta.volatility import BollingerBands
+from ta.volume import VolumeWeightedAveragePrice
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+from keras.models import Sequential
+from keras.layers import Dense, LSTM, Dropout
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import requests
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+class QLearningStockPrediction:
+    def __init__(self, alpha=0.1, gamma=0.9, epsilon=0.1):
+        self.alpha = alpha  # Learning rate
+        self.gamma = gamma  # Discount factor
+        self.epsilon = epsilon  # Exploration rate
+        self.q_values = {}  # Dictionary to store Q-values for each state-action pair
+        self.visited_state_actions = set()  # Set to store visited state-action pairs
+        self.model = RandomForestClassifier()  # Initialize model attribute to None
+
+
+    def back_track(self, next_state, reward):
+        for state, action in self.visited_state_actions:
+            state_tuple = tuple(state)  # Convert numpy array to a tuple
+            current_q_value = self.q_values.get(state_tuple, {'BUY': 0, 'SELL': 0, 'HOLD': 0}).get(action, 0)
+            max_next_q_value = max(self.q_values.get(tuple(next_state), {'BUY': 0, 'SELL': 0, 'HOLD': 0}).values())
+            new_q_value = current_q_value + self.alpha * (reward + self.gamma * max_next_q_value - current_q_value)
+            self.q_values.setdefault(state_tuple, {'BUY': 0, 'SELL': 0, 'HOLD': 0})[action] = new_q_value
+
+        # Clear the visited state-action pairs after backtracking
+        self.visited_state_actions.clear()
+
+    def preprocess_data(self, data):
+        # Impute NaN values with the mean of the respective columns
+        imputer = SimpleImputer(strategy='mean')
+        data = imputer.fit_transform(data)
+        # Normalize data
+        scaler = StandardScaler()
+        data = scaler.fit_transform(data)
+        return data
+
+    def choose_action(self, state):
+        if np.random.uniform(0, 1) < self.epsilon:
+            return np.random.choice(['BUY', 'SELL', 'HOLD'])  # Exploration: Randomly choose action
+        else:
+            # Exploitation: Choose action with highest Q-value
+            return max(self.q_values.get(state, {'BUY': 0, 'SELL': 0, 'HOLD': 0}).items(), key=lambda x: x[1])[0]
+
+    def update_q_values(self, state, action, reward, next_state):
+        state_tuple = tuple(state)  # Convert numpy array to a tuple
+        current_q_value = self.q_values.get(state_tuple, {'BUY': 0, 'SELL': 0, 'HOLD': 0}).get(action, 0)
+        max_next_q_value = max(self.q_values.get(tuple(next_state), {'BUY': 0, 'SELL': 0, 'HOLD': 0}).values())
+        new_q_value = current_q_value + self.alpha * (reward + self.gamma * max_next_q_value - current_q_value)
+        self.q_values.setdefault(state_tuple, {'BUY': 0, 'SELL': 0, 'HOLD': 0})[action] = new_q_value
+        self.visited_state_actions.add((state_tuple, action))  # Add the state-action pair to visited pairs
+
+    def save_q_values(self, file_path):
+        with open(file_path, 'wb') as f:
+            pickle.dump(self.q_values, f)
+        print(f"Q-values saved to file: {file_path}")
+
+    def load_q_values(self, file_path):
+        with open(file_path, 'rb') as f:
+            self.q_values = pickle.load(f)
+
+    def predict(self, state):
+        state_tuple = tuple(state.flatten())  # Convert numpy array to a tuple
+        return self.choose_action(state_tuple)
+
+    def fit(self, X_train, y_train):
+        # Train the model (example implementation)
+        self.model = RandomForestClassifier()
+        self.model.fit(X_train, y_train)
+
+    def save_model(self, file_path):
+        with open(file_path, 'wb') as f:
+            pickle.dump(self.model, f)
+        print(f"Model saved to file: {file_path}")
+
+    @classmethod
+    def load_model(cls, file_path):
+        try:
+            with open(file_path, 'rb') as f:
+                return pickle.load(f)
+        except FileNotFoundError:
+            print("Model file not found.")
+            return None
+        except Exception as e:
+            print("An error occurred while loading the model:", e)
+            return None
+
+def fetch_data(symbol):
+    data = yf.download(symbol, period="1y", interval="1d")
+    return data
+
+def add_technical_indicators(data):
+    data['SMA_20'] = SMAIndicator(data['Close'], window=20).sma_indicator()
+    data['EMA_50'] = EMAIndicator(data['Close'], window=50).ema_indicator()
+    data['RSI'] = RSIIndicator(data['Close'], window=14).rsi()
+    bb = BollingerBands(data['Close'], window=20)
+    data['LowerBand'] = bb.bollinger_lband()
+    data['UpperBand'] = bb.bollinger_hband()
+    vwap = VolumeWeightedAveragePrice(data['High'], data['Low'], data['Close'], data['Volume'], window=14)
+    data['VWAP'] = vwap.volume_weighted_average_price()
+
+    # Calculate Chaikin Money Flow
+    mf_multiplier = ((data['Close'] - data['Low']) - (data['High'] - data['Close'])) / (data['High'] - data['Low'])
+    mf_volume = mf_multiplier * data['Volume']
+    data['CMF'] = mf_volume.rolling(window=20).sum() / data['Volume'].rolling(window=20).sum()
+
+    return data
+
+def preprocess_data(data):
+    data = add_technical_indicators(data)
+    data.dropna(inplace=True)
+    return data
+
+def calculate_reward(previous_price, current_price, action):
+    if action == 'BUY':
+        return current_price - previous_price
+    elif action == 'SELL':
+        return previous_price - current_price
+    else:
+        return 0
+
+def build_model(input_shape):
+    model = Sequential()
+    model.add(LSTM(50, return_sequences=True, input_shape=input_shape))
+    model.add(Dropout(0.2))
+    model.add(LSTM(50, return_sequences=False))
+    model.add(Dropout(0.2))
+    model.add(Dense(3, activation='softmax'))
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+
+def fetch_news_sentiment(symbol, start_date, end_date):
+    # Initialize SentimentIntensityAnalyzer
+    analyzer = SentimentIntensityAnalyzer()
+
+    # Placeholder list to store sentiment scores of each article
+    sentiment_scores = []
+
+    # Convert start_date and end_date to string format
+    start_date_str = start_date.strftime('%Y-%m-%d')
+    end_date_str = end_date.strftime('%Y-%m-%d')
+
+    # Fetch news articles related to the symbol within the given date range using a hypothetical API
+    # Replace 'YOUR_API_KEY' with the actual API key with https://newsapi.org/
+    api_key = 'YOUR_API_KEY'
+    url = f'https://newsapi.org/v2/everything?q={symbol}&from={start_date_str}&to={end_date_str}&apiKey={api_key}'
+    response = requests.get(url)
+
+    if response.status_code == 200:
+        news_data = response.json()
+
+        # Iterate through each article in the news data
+        for article in news_data['articles']:
+            # Perform sentiment analysis on the article's title and description
+            title_sentiment = analyzer.polarity_scores(article['title'])
+            description_sentiment = analyzer.polarity_scores(article['description'])
+
+            # Aggregate sentiment scores (e.g., taking the compound score as the overall sentiment)
+            overall_sentiment_score = (title_sentiment['compound'] + description_sentiment['compound']) / 2
+
+            # Append the overall sentiment score to the list
+            sentiment_scores.append(overall_sentiment_score)
+
+    # Calculate the average sentiment score for the day
+    if sentiment_scores:
+        daily_sentiment_score = sum(sentiment_scores) / len(sentiment_scores)
+    else:
+        daily_sentiment_score = 0  # If no articles found, set sentiment score to 0
+
+    return daily_sentiment_score
+
+
+def plot_confusion_matrix(y_true, y_pred, labels):
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=labels, yticklabels=labels)
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+    plt.title('Confusion Matrix')
+    plt.show()
+
+
+def calculate_reward_based_on_sentiment(sentiment_score):
+    # Define thresholds for sentiment polarity
+    positive_threshold = 0.2  # Adjust as needed
+    negative_threshold = -0.2  # Adjust as needed
+
+    if sentiment_score >= positive_threshold:
+        return 1  # Positive reward for good news
+    elif sentiment_score <= negative_threshold:
+        return -1  # Negative reward for bad news
+    else:
+        return 0  # Neutral sentiment, no reward or penalty
+
+
+def is_usa_market_open():
+    # Define Indian stock market trading hours: Monday to Friday, 9:15 AM to 3:30 PM (Indian Standard Time - IST)
+    current_time = datetime.now(pytz.timezone('US/Eastern'))
+    if current_time.weekday() < 5:  # Monday is 0, Friday is 4
+        market_open_time = current_time.replace(hour=9, minute=30, second=0)
+        market_close_time = current_time.replace(hour=16, minute=0, second=0)
+        return market_open_time <= current_time <= market_close_time
+    else:
+        return False
+
+
+def main():
+    symbol = 'AAPL'  # Stock symbol
+    q_values_file = 'q_values.pickle'  # Path to save Q-values file
+    model_file = 'q_learning.pickle'  # Path to save the model file
+
+    # Define variables for storing labels and actions
+    true_labels = []
+    predicted_labels = []
+
+    # Attempt to load the model
+    try:
+        model = QLearningStockPrediction.load_model(model_file)
+        if model is None:
+            raise FileNotFoundError("Model file not found.")
+        print("Model loaded successfully.")
+    except FileNotFoundError:
+        print("Model file not found. Starting with a fresh model.")
+        model = QLearningStockPrediction()
+    except EOFError:
+        print("End of file encountered while loading the model. The file may be corrupted.")
+        return
+    except Exception as e:
+        print("An error occurred while loading the model:", e)
+        return
+
+
+    # Attempt to load the Q-values
+    try:
+        model.load_q_values(q_values_file)
+        print("Q-values loaded successfully.")
+    except FileNotFoundError:
+        print("Q-values file not found. Starting with a fresh model.")
+
+    except Exception as e:
+        print("An error occurred while loading the model:", e)
+        return
+    # Initialize start time
+    start_time = time.time()
+
+    # Run the loop for a maximum duration of 8 hours (28800 seconds)
+    while (time.time() - start_time) < 28800:  # 8 hours in seconds
+        current_time = datetime.now(pytz.timezone('US/Eastern'))
+        if is_usa_market_open():
+            print("Market is open.")  # Debug print
+            # Fetch real-time data and make predictions only during market hours
+            try:
+                data = yf.download(symbol, period="1y", interval="1d")
+                if data is None or data.empty:
+                    raise ValueError("Failed to retrieve data.")
+
+                # Initialize previous_price
+                previous_price = data['Close'].iloc[-1]  # Add this line
+
+                # Preprocess data
+                data = preprocess_data(data)
+
+                # Ensure enough data points are available for additional features
+                if len(data) >= 50:  # Adjusted threshold to 50 data points
+                    # Assuming 'state' is based on the latest stock price and additional features
+                    latest_price = data['Close'].iloc[-1]
+                    sma_20_latest = data['SMA_20'].iloc[-1]
+                    ema_50_latest = data['EMA_50'].iloc[-1]
+                    rsi_latest = data['RSI'].iloc[-1]
+                    lower_band_latest = data['LowerBand'].iloc[-1]
+                    upper_band_latest = data['UpperBand'].iloc[-1]
+                    vwap_latest = data['VWAP'].iloc[-1]
+                    cmf_latest = data['CMF'].iloc[-1]
+
+                    # Fetch news sentiment
+                    start_date = current_time.date()
+                    end_date = start_date + timedelta(days=1)
+                    sentiment_score = fetch_news_sentiment(symbol, start_date, end_date)
+
+                    # Add sentiment feature to the state
+                    state = np.array([latest_price, sma_20_latest, ema_50_latest, rsi_latest, lower_band_latest, upper_band_latest, vwap_latest, cmf_latest, sentiment_score])
+                    print("Current state:", state)  # Debug print
+
+                    # Make prediction
+                    action = model.predict(state)
+                    print("Predicted action:", action)  # Debug print
+
+                    # Calculate true_action based on the direction of the next minute's price change
+                    next_minute_price = latest_price + random.uniform(-0.1, 0.1)
+                    if next_minute_price > latest_price:
+                        true_action = 'BUY'
+                    elif next_minute_price < latest_price:
+                        true_action = 'SELL'
+                    else:
+                        true_action = 'HOLD'
+
+                    stock_movement = "UP" if next_minute_price > latest_price else "DOWN" if next_minute_price < latest_price else "STABLE"
+                    next_time = current_time + timedelta(minutes=1)  # Assuming prediction is made for the next minute
+
+                    print(f"STOCK price : {latest_price}\t\tPred:{next_minute_price}\tActions of agent: {action}\tStock UP & DOWN: {stock_movement}\tTime: {current_time}\tPredictions Time: {next_time}")
+
+                    # Append true action to true labels list
+                    true_labels.append(true_action)
+
+                    # Append predicted action to predicted labels list
+                    predicted_labels.append(action)
+
+                    if len(true_labels) % 100 == 0:  # Adjust as needed
+                        plot_confusion_matrix(true_labels, predicted_labels, labels=['BUY', 'SELL', 'HOLD'])
+
+                    # Inside the loop where rewards are calculated
+                    # Calculate the change in price from the current minute to the next minute
+                    price_change = next_minute_price - previous_price
+
+                    # Determine the effective action taken by the agent
+                    if action == 'BUY' and price_change > 0:  # Agent bought and price increased
+                        effective_action = 'BUY'
+                    elif action == 'SELL' and price_change < 0:  # Agent sold and price decreased
+                        effective_action = 'SELL'
+                    else:  # Agent's action did not match price movement
+                        effective_action = 'HOLD'
+
+                    # Inside the loop where rewards are calculated
+                    reward = calculate_reward(previous_price, next_minute_price, action)
+                    # Fetch sentiment score and calculate reward based on sentiment
+                    sentiment_score = fetch_news_sentiment(symbol, start_date, end_date)
+                    reward += calculate_reward_based_on_sentiment(sentiment_score)
+
+                    # Update Q-values
+                    model.update_q_values(state, action, reward, state)
+                    previous_price = next_minute_price  # Update previous_price
+
+                    # Wait for 60 seconds before fetching new data
+                    time.sleep(60)
+
+                    # Save the Q-values and the model every 5 minutes
+                    if int((time.time() - start_time) / 60) % 5 == 0:
+                        model.save_q_values(q_values_file)
+                        model.save_model(model_file)
+
+                else:
+                    print("Insufficient data points for additional features. Waiting...")
+                    time.sleep(300)  # Wait for 5 minutes if data points are insufficient
+            except Exception as e:
+                print("An error occurred:", e)
+                time.sleep(300)  # Wait for 5 minutes before retrying
+        else:
+            print("Market is closed. Waiting...")
+            time.sleep(300)  # Check every 5 minutes if the market has opened
+
+    # Save the final Q-values and the model after training
+    model.save_q_values(q_values_file)
+    model.save_model(model_file)
+
+if __name__ == "__main__":
+    main()
