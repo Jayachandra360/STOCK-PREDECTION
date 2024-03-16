@@ -1,0 +1,46 @@
+OUTPUT OF CODE:
+Current state: [ 1.71154999e+02  1.76701750e+02  1.81193211e+02  3.46413406e+01
+  1.65901513e+02  1.87501987e+02  1.74602224e+02 -1.77561688e-01
+  0.00000000e+00]
+Predicted action: BUY
+STOCK price : 171.15499877929688		Pred:171.24599825143832	Actions of agent: BUY	Stock UP & DOWN: UP	Time: 2024-03-15 14:21:56.267721-04:00	Predictions Time: 2024-03-15 14:22:56.267721-04:00
+[*********************100%%**********************]  1 of 1 completedMarket is open.
+
+Current state: [ 1.71093994e+02  1.76698700e+02  1.81190819e+02  3.45511902e+01
+  1.65892166e+02  1.87505234e+02  1.74600792e+02 -1.79968412e-01
+  0.00000000e+00]
+Predicted action: HOLD
+STOCK price : 171.093994140625		Pred:171.1464660281393	Actions of agent: HOLD	Stock UP & DOWN: UP	Time: 2024-03-15 14:22:57.052198-04:00	Predictions Time: 2024-03-15 14:23:57.052198-04:00
+[*********************100%%**********************]  1 of 1 completedQ-values saved to file: /content/drive/MyDrive/q_values.pickle
+Model saved to file: /content/drive/MyDrive/q_learning.pickle
+Market is open.
+
+Current state: [ 1.71110001e+02  1.76699500e+02  1.81191446e+02  3.45747985e+01
+  1.65894624e+02  1.87504376e+02  1.74600907e+02 -1.79340383e-01
+  0.00000000e+00]
+Predicted action: BUY
+STOCK price : 171.11000061035156		Pred:171.05940615301492	Actions of agent: BUY	Stock UP & DOWN: DOWN	Time: 2024-03-15 14:23:58.094540-04:00	Predictions Time: 2024-03-15 14:24:58.094540-04:00
+[*********************100%%**********************]  1 of 1 completedMarket is open.
+
+Current state: [ 1.71054993e+02  1.76696750e+02  1.81189289e+02  3.44938008e+01
+  1.65886157e+02  1.87507342e+02  1.74599315e+02 -1.81526552e-01
+  0.00000000e+00]
+Predicted action: BUY
+STOCK price : 171.05499267578125		Pred:170.96616162142956	Actions of agent: BUY	Stock UP & DOWN: DOWN	Time: 2024-03-15 14:24:58.987130-04:00	Predictions Time: 2024-03-15 14:25:58.987130-04:00
+[*********************100%%**********************]  1 of 1 completedMarket is open.
+
+There's a summary of the current execution:
+
+1. **Current State**: The agent is in a certain state represented by a feature vector. The features include various technical indicators such as SMA, EMA, RSI, Bollinger Bands, VWAP, CMF, and sentiment score.
+
+2. **Predicted Action**: The agent predicts the optimal action to take based on the current state. In the provided example, the predicted action is "BUY".
+
+3. **Stock Movement**: The actual movement of the stock price is determined based on whether it goes up, down, or remains stable. This information is used to evaluate the effectiveness of the predicted action.
+
+4. **Data Fetching**: The system fetches real-time data from Yahoo Finance API and continuously updates the state during market hours.
+
+5. **Q-values and Model Saving**: The Q-values and the model are periodically saved to files for persistence and future use.
+
+6. **Market Status**: The system checks whether the market is open or closed and performs prediction and training only during market hours.
+
+Overall, the system is actively making predictions and updating its Q-values based on real-time market data and sentiment analysis of news articles. It aims to optimize its actions (BUY, SELL, HOLD) to maximize rewards in the stock market environment.
