@@ -225,7 +225,7 @@ def is_usa_market_open():
 
 def main():
     symbol = 'AAPL'  # Stock symbol
-    q_values_file = 'q_values.pickle'  # Path to save Q-values file
+    q_values_file = 'q_values.pickle'  # Path to save Q-values file and DO not ASK for the .pickle files are be private files and it's development in state
     model_file = 'q_learning.pickle'  # Path to save the model file
 
     # Define variables for storing labels and actions
