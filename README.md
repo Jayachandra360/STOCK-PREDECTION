@@ -50,8 +50,6 @@ This project implements a Q-learning based stock prediction system that utilizes
 
 ---
 
-Feel free to customize the README file with additional information specific to your project or any acknowledgments you'd like to include.
-
 Summary of code:
 The provided code implements a Q-learning-based stock prediction system using reinforcement learning techniques. Here's a summary of its key components and functionalities:
 
